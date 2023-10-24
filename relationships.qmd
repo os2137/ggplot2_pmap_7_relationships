@@ -1,0 +1,316 @@
+---
+title: "relationships"
+format: html
+editor: visual
+---
+
+## [Access the slides, code, and other materials at the course website](https://datavizm20.classes.andrewheiss.com/content/07-content/)
+
+## [Slides](https://datavizm20.classes.andrewheiss.com/content/07-content/#slides)
+
+## [Download the data and see the polished code](https://datavizm20.classes.andrewheiss.com/example/07-example/)
+
+## [Youtube playlist](https://www.youtube.com/watch?v=FsnM8e6P71g&list=PLS6tnpTr39sGarIxAwCcmheAoKaLRGy1j&index=4)
+
+```{r}
+library(tidyverse)  # For ggplot, dplyr, and friends
+library(patchwork)  # For combining ggplot plots
+library(GGally)     # For scatterplot matrices
+library(broom)      # For converting model objects to data frames
+
+```
+
+```{r}
+car_model <- lm(hwy ~displ, data = mpg)
+```
+
+```{r}
+tidy(car_model)
+```
+
+```{r}
+tidy(car_model, conf.int = TRUE)
+```
+
+```{r}
+glance(car_model)
+```
+
+```{r}
+car_model_big <- lm(hwy ~displ + cyl + drv, 
+                    data = mpg)
+car_model_big
+summary(car_model_big)
+```
+
+```{r}
+tidy(car_model_big, conf.int = TRUE)
+```
+
+```{r}
+car_coff <- tidy(car_model_big, conf.int = TRUE) |> 
+  filter(term != '(Intercept)')
+car_coff
+```
+
+### Plot the estimate and confidence intervals with geom_pointrange()
+
+```{r}
+car_coff |> 
+  ggplot(aes(x = estimate, y = fct_rev(term))) + 
+  geom_pointrange(aes(xmin = conf.low , 
+                  xmax = conf.high)) + 
+  geom_vline(xintercept = 0, color = 'red4')
+```
+
+```{r}
+cars_new_data <-  tibble(
+  displ = seq(2,7, by = 0.01), 
+  cyl = mean(mpg$cyl), 
+  drv = 'f'
+)
+ 
+cars_new_data |> head()
+```
+
+```{r}
+predicted_mpg <- augment(car_model_big, newdata = cars_new_data, se_fit = TRUE)
+head(predicted_mpg)
+```
+
+```{r}
+predicted_mpg |> 
+  ggplot(aes( x= displ, y = .fitted )) + 
+  geom_point() + 
+ geom_smooth()
+```
+
+```{r}
+cars_new_data_fancy <- expand_grid(displ = seq(2, 7, by = 0.01), 
+                                   cyl = mean(mpg$cyl),
+                                   drv = c('f', 'r', '4'))
+cars_new_data_fancy |> head()
+```
+
+```{r}
+predicted_mpg_fancy <- augment(car_model_big, newdata = cars_new_data_fancy, se_fit = TRUE)
+predicted_mpg_fancy |> head()
+```
+
+```{r}
+weather_atl <- read_csv("data/atl-weather-2019.csv")
+```
+
+## Dual y-axes
+
+```{r}
+temperature_plot <- weather_atl |>
+  ggplot(aes(x = time, y = temperatureHigh)) +
+  geom_line() +
+  scale_y_continuous(sec.axis = sec_axis(trans = ~ (32 - .) * -5 / 9,
+                                         name = 'Celsius')) + # using formula to converting Fahrenheit to Celsius
+  theme_minimal() +
+  labs(x = NULL, y = "Fahrenheit")
+temperature_plot
+```
+
+## Combining plots
+
+```{r}
+humidity_plot <- weather_atl |>
+  ggplot(aes(x = time, y = humidity)) +
+  geom_line() +
+  
+  theme_minimal() +
+  labs(x = NULL, y = "Humidity")
+humidity_plot
+```
+
+```{r}
+temperature_plot + humidity_plot + 
+  plot_layout(ncol = 1, heights = c(0.7, 0.3))
+```
+
+## Correlations
+
+```{r}
+weather_correlations <- weather_atl |> 
+  select(temperatureHigh, temperatureLow, humidity, windSpeed, precipProbability)
+weather_correlations
+```
+
+```{r}
+ggpairs(weather_correlations) +
+  labs(title = "Correlations!") +
+  theme_dark()
+```
+
+## **Correlograms**
+
+```{r}
+# Create a correlation matrix
+things_to_correlate <- weather_atl %>% 
+  select(temperatureHigh, temperatureLow, humidity, windSpeed, precipProbability) %>% 
+  cor()
+
+things_to_correlate
+```
+
+The two halves of this matrix (split along the diagonal line) are identical, so we can remove the lower triangle with this code (which will set all the cells in the lower triangle to `NA`):
+
+```{r}
+# Get rid of the lower triangle
+things_to_correlate[lower.tri(things_to_correlate)] <- NA
+things_to_correlate
+```
+
+Finally, in order to plot this, the data needs to be in tidy (or long) format. Here we convert the `things_to_correlate` matrix into a data frame, add a column for the row names, take all the columns and put them into a single column named `measure1`, and take all the correlation numbers and put them in a column named `cor` In the end, we make sure the measure variables are ordered by their order of appearance (otherwise they plot alphabetically and don\'t make a triangle)
+
+```{r}
+things_to_correlate_long <- things_to_correlate %>% 
+  # Convert from a matrix to a data frame
+  as.data.frame() %>% 
+  # Matrixes have column names that don't get converted to columns when using
+  # as.data.frame(), so this adds those names as a column
+  rownames_to_column("measure2") %>% 
+  # Make this long. Take all the columns except measure2 and put their names in
+  # a column named measure1 and their values in a column named cor
+  pivot_longer(cols = -measure2,
+               names_to = "measure1",
+               values_to = "cor") %>% 
+  # Make a new column with the rounded version of the correlation value
+  mutate(nice_cor = round(cor, 2)) %>% 
+  # Remove rows where the two measures are the same (like the correlation
+  # between humidity and humidity)
+  filter(measure2 != measure1) %>%
+  # Get rid of the empty triangle
+  filter(!is.na(cor)) %>% 
+  # Put these categories in order
+  mutate(measure1 = fct_inorder(measure1),
+         measure2 = fct_inorder(measure2))
+
+things_to_correlate_long
+```
+
+Phew. With the data all tidied like that, we can make a correlogram with a heatmap. This is just like [the heatmap you made in session 4](https://datavizm20.classes.andrewheiss.com/example/04-example/#heatmap), but here we manipulate the fill scale a little so that it\'s diverging with three colors: a high value, a midpoint value, and a low value.
+
+```{r}
+ggplot(things_to_correlate_long, 
+       aes(x = measure2, y = measure1, fill = cor)) +
+  geom_tile() +
+  geom_text(aes(label = nice_cor)) +
+  scale_fill_gradient2(low = "#E16462", mid = "white", high = "#0D0887",
+                       limits = c(-1, 1)) +
+  labs(x = NULL, y = NULL) +
+  coord_equal() +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+Instead of using a heatmap, we can also use points, which encode the correlation information both as color *and* as size. To do that, we just need to switch `geom_tile()` to `geom_point()` and set the `size = cor` mapping:
+
+```{r}
+ggplot(things_to_correlate_long, 
+       aes(x = measure2, y = measure1, color = cor)) +
+  # Size by the absolute value so that -0.7 and 0.7 are the same size
+  geom_point(aes(size = abs(cor))) +
+  scale_color_gradient2(low = "#E16462", mid = "white", high = "#0D0887",
+                        limits = c(-1, 1)) +
+  scale_size_area(max_size = 15, limits = c(-1, 1), guide = FALSE) +
+  labs(x = NULL, y = NULL) +
+  coord_equal() +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+## Regression
+
+```{r}
+weather_atl_summer <- weather_atl |>
+  filter(time >= "2019-05-01",
+         time <= "2019-09-30") |>
+  mutate(
+    humidity_scaled = humidity * 100,
+    moonPhase_scaled = moonPhase * 100,
+    precipProbability_scaled = precipProbability * 100,
+    cloudCover_scaled = cloudCover * 100
+  )
+```
+
+```{r}
+model_simple <- lm(temperatureHigh ~ humidity_scaled, data = weather_atl_summer)
+
+summary(model_simple)
+```
+
+```{r}
+tidy(model_simple)
+```
+
+```{r}
+model_simple |> 
+  ggplot(aes( x = humidity_scaled, y = temperatureHigh)) + 
+  geom_point() + 
+  geom_smooth(method = 'lm')
+```
+
+```{r}
+model_big <- lm(temperatureHigh ~ humidity_scaled + moonPhase_scaled + precipProbability_scaled + cloudCover_scaled + windSpeed + pressure, data = weather_atl_summer)
+```
+
+```{r}
+tidy(model_big)
+```
+
+```{r}
+model_coefficients <- tidy(model_big, conf.int = TRUE) |> 
+  filter(term != "(Intercept)")
+```
+
+```{r}
+model_coefficients |> 
+  ggplot(
+    aes(x = estimate, y = (term))) + 
+      geom_pointrange(aes(xmin = conf.low, 
+                      xmax = conf.high)) + 
+  geom_vline(xintercept = 0, color = 'red4')
+  
+```
+
+## Marginal effects plot
+
+```{r}
+newdata <- tibble(humidity_scaled = mean(weather_atl_summer$humidity_scaled),
+              moonPhase_scaled = mean(weather_atl_summer$moonPhase_scaled), 
+              precipProbability_scaled = mean(weather_atl_summer$precipProbability_scaled), 
+              cloudCover_scaled = mean(weather_atl_summer$cloudCover_scaled), 
+              windSpeed = seq(2, 7,  by = 0.1), 
+              pressure = mean(weather_atl_summer$pressure)
+  
+)
+```
+
+```{r}
+predictions <- augment(model_big, newdata = newdata, se_fit = TRUE)
+```
+
+```{r}
+predictions |> 
+  ggplot(aes(x = windSpeed, y = .fitted)) + 
+  geom_line()
+```
+
+```{r}
+predictions <- augment(model_big, newdata = newdata, se_fit = TRUE) |> 
+  mutate(conf_low = .fitted + (-1.96 * .se.fit), 
+         conf_high = .fitted + (1.96 * .se.fit))
+```
+
+```{r}
+predictions |> 
+  ggplot(aes(x = windSpeed, y = .fitted)) + 
+  geom_ribbon(aes(ymin = conf_low, 
+                  ymax = conf_high), 
+              alpha = 0.3) +
+  geom_line()
+```
